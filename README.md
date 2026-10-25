@@ -4,16 +4,15 @@
 
 | File | Goes to |
 |---|---|
-| `MIDI Control Center presets/FL_Drums_Transport.minilabmk2` | MiniLab user memory (pads 1–8 drums, pads 9–16 transport) |
-| `MIDI Control Center presets/FL_Drums16.minilabmk2` | MiniLab user memory (all 16 pads drums) |
+| `MIDI Control Center presets/FL_Drums16.minilabmk2` | MiniLab user memory (one preset does everything) |
 | `FL Studio script/MiniLab mkII FL/` (whole folder) | `Documents\Image-Line\FL Studio\Settings\Hardware\` |
 
 ## Setup
 
 1. **Load the presets onto the MiniLab**
    - Install/open **Arturia MIDI Control Center** with the MiniLab plugged in.
-   - In the *Project Browser*, click **Import** and pick a `.minilabmk2` file.
-   - Select the imported preset, choose a free user memory slot (e.g. User 2) on the right, and click **Store To**. Do the same for the other preset in another slot.
+   - In the *Project Browser*, click **Import** and pick `FL_Drums16.minilabmk2`.
+   - Select the imported preset, choose a free user memory slot (e.g. User 2) on the right, and click **Store To**.
    - On the MiniLab, hold **Shift** and press the pad for that memory slot to switch to it.
 2. **Install the FL script**
    - Copy the folder `MiniLab mkII FL` into
@@ -41,19 +40,33 @@
 - K1–K13 are endless (relative), so values never jump. "Plugin 1–5" are the first 5 parameters of the selected channel's instrument.
 - **K14–K16** send plain CC 115–117. To use one, right-click any FL knob, choose **Link to controller…**, and turn the MiniLab knob.
 
-### Pads (MIDI ch 10, General MIDI drum notes)
+### Pads
+
+All 16 pads send drum notes (MIDI ch 10). Use the MiniLab's **Pad 1-8 / 9-16** button to switch between the two rows. **Click K1** to cycle through the 3 pad modes (MPC → Transport → Channel). The pad colours show which mode you're in, and FL's hint bar shows the mode name.
+
+| Mode | Colour | What the pads do |
+|---|---|---|
+| **MPC** (default) | Yellow | Pad N plays channel N of the Channel Rack (pads 1–16 → channels 1–16), for drums, FX and sample chops, one channel each. |
+| **Transport** | Coloured per function | See below. |
+| **Channel** | Cyan (selected pad is white) | Pad N selects channel N. |
+
+MPC and Channel work on banks of 16 channels. Turn **K1** past channel 16 and the pads move to channels 17–32, and so on.
+
+**Transport mode:**
 
 | Pad | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
 |---|---|---|---|---|---|---|---|---|
-| Bank 1 | Kick 36 | Snare 38 | Clap 39 | Closed HH 42 | Open HH 46 | Low tom 41 | Mid tom 45 | Crash 49 |
-| Bank 2 (*Drums16*) | Rim 37 | Snare 2 40 | Pedal HH 44 | Low-mid tom 47 | High tom 50 | Ride 51 | Tambourine 54 | Cowbell 56 |
-| Bank 2 (*Drums_Transport*) | ▶ Play/Pause | ■ Stop | ● Record | Metronome | Song/Pattern | Pattern − | Pattern + | Undo |
+| | ▶ Play/Pause | ■ Stop | ● Record on/off | ⏪ Rewind (hold) | ⏩ Fast forward (hold) | Song/Pattern | Channel up | Channel down |
 
-Use the MiniLab's **Pad 1-8 / 9-16** button to switch between banks.
+| Pad | 9 | 10 | 11 | 12 | 13–16 |
+|---|---|---|---|---|---|
+| | Metronome | Pattern − | Pattern + | Undo | — |
 
-Click **K1** to switch the pad mode:
-- **Selected channel** (blue pads, the default): notes go to whichever channel is selected. Use this for **FPC** or other drum plugins with GM mapping (Battery, etc.). This mode records normally.
-- **Channel Rack** (yellow pads): pad N plays channel N of the current bank of 8 channels. With the default template, pad 1 plays Kick, pad 2 Clap, pad 3 Hat, and pad 4 Snare. Turn K1 to move between banks (channels 1–8, 9–16, …). In this mode, pads 9–16 of *Drums16* play the next 8 channels. This mode is made for finger-drumming the Channel Rack. To record into the piano roll, use Selected channel mode.
+"Channel up" moves up the Channel Rack (to the previous channel).
+
+Typical loop-record flow: in **Transport** mode, press Record, then Play. Click K1 twice to reach **MPC** and play the part. Click K1 once to get back to Transport. To play a melody, select its channel (in **Channel** mode or with K1) and use the keys, which always play the selected channel.
+
+> The old `FL_Drums_Transport` preset has been merged into Transport mode and removed. If it's still stored on your MiniLab, its pads 9–16 keep working, but you no longer need it.
 
 ## Tweaking
 

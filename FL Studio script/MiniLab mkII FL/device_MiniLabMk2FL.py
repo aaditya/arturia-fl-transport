@@ -1,22 +1,24 @@
 # name=MiniLab mkII FL (custom)
 # url=
 #
-# Companion script for the MCC presets FL_Drums_Transport / FL_Drums16.
+# Companion script for the MCC preset FL_Drums16.
 #
 #   Knobs (ch 1, CC 102-117, relative except 14-16)
-#     K1  turn: select channel           click: toggle pad mode (Selected channel / Channel Rack)
+#     K1  turn: select channel           click: next pad mode
 #     K2  channel volume                 K3  channel pan
 #     K4-K8  plugin params 1-5 of the selected channel
 #     K9  turn: select mixer track       click: show/hide selected channel's plugin
 #     K10 track volume   K11 track pan   K12 track stereo separation   K13 master volume
 #     K14-K16  absolute, not handled -> use FL "Link to controller"
 #
-#   Pads (ch 10, GM drum notes)
-#     Selected-channel mode: notes go to the selected channel (FPC, Battery, ...)
-#     Channel Rack mode:     pad N plays channel N of the current bank of 8 (bank follows K1)
+#   Pads (ch 10, GM drum notes), 3 modes cycled by clicking K1:
+#     MPC (yellow):             pad N plays channel N of the current bank of 16 (bank follows K1)
+#     Channel (cyan):           pad N selects channel N of the current bank of 16
+#     Transport (green):        pads 1-8 = play/pause, stop, record, rewind, fast forward,
+#                               song/pattern, channel up, channel down
+#                               pads 9-12 = metronome, pattern -, pattern +, undo
 #
-#   Transport pads 9-16 (ch 16, CC 20-27, FL_Drums_Transport preset only)
-#     play/pause, stop, record, metronome, song/pattern, pattern -, pattern +, undo
+#   Legacy: ch 16 CC 20-27 (old FL_Drums_Transport preset) still work as transport buttons
 
 import channels
 import device
@@ -43,12 +45,18 @@ DRUM_NOTES = [36, 38, 39, 42, 46, 41, 45, 49,
 PAD_OF_NOTE = {n: i for i, n in enumerate(DRUM_NOTES)}
 CHANNEL_RACK_NOTE = 60  # note sent to channels in Channel Rack mode (C5 = sample's root)
 
+MODE_MPC, MODE_TRANSPORT, MODE_CHANNEL = range(3)
+MODE_NAMES = ["MPC", "Transport", "Channel"]
+BANK_SIZE = 16
+
 PLUGIN_PARAM_KNOBS = 5
 STEP = 1.0 / 127
 
 # Pad LED colours (MiniLab sysex)
 OFF, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = 0, 1, 4, 5, 16, 17, 20, 127
 PAD_LED_FIRST = 0x70
+TRANSPORT_MODE_COLORS = [GREEN, YELLOW, RED, CYAN, CYAN, MAGENTA, BLUE, BLUE,
+                         WHITE, MAGENTA, MAGENTA, RED, OFF, OFF, OFF, OFF]
 
 
 def relative(value):
@@ -66,8 +74,9 @@ def clamp(v, lo, hi):
 
 class MiniLab:
     def __init__(self):
-        self.channel_rack_mode = False
-        self.held = {}  # pad index -> global channel index, for note-offs in Channel Rack mode
+        self.mode = MODE_MPC
+        self.held = {}  # pad index -> global channel index, for note-offs in MPC mode
+        self.held_seek = {}  # pad index -> transport.rewind / transport.fastForward while held
         self.led_state = None
 
     # --- feedback ---------------------------------------------------------
@@ -77,15 +86,24 @@ class MiniLab:
             device.midiOutSysex(bytes([0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42, 0x02, 0x00,
                                        0x10, PAD_LED_FIRST + pad, color, 0xF7]))
 
+    def current_led_state(self):
+        return (self.mode, self.bank_start(), channels.channelCount(), channels.selectedChannel())
+
+    def pad_color(self, pad):
+        index = self.bank_start() + pad
+        exists = index < channels.channelCount()
+        if self.mode == MODE_MPC:
+            return YELLOW if exists else OFF
+        if self.mode == MODE_CHANNEL:
+            if not exists:
+                return OFF
+            return WHITE if index == channels.selectedChannel() else CYAN
+        return TRANSPORT_MODE_COLORS[pad]
+
     def refresh_pad_leds(self):
-        self.led_state = (self.channel_rack_mode, self.bank_start(), channels.channelCount())
-        if self.channel_rack_mode:
-            first = self.bank_start()
-            for pad in range(8):
-                self.set_pad_led(pad, YELLOW if first + pad < channels.channelCount() else OFF)
-        else:
-            for pad in range(8):
-                self.set_pad_led(pad, BLUE)
+        self.led_state = self.current_led_state()
+        for pad in range(16):
+            self.set_pad_led(pad, self.pad_color(pad))
 
     def hint(self, text):
         ui.setHintMsg(text)
@@ -94,7 +112,27 @@ class MiniLab:
 
     def bank_start(self):
         sel = channels.selectedChannel()
-        return (max(sel, 0) // 8) * 8
+        return (max(sel, 0) // BANK_SIZE) * BANK_SIZE
+
+    def select_channel(self, index):
+        count = channels.channelCount()
+        if not count:
+            return
+        index = clamp(index, 0, count - 1)
+        channels.selectOneChannel(index)
+        self.hint("Channel: " + channels.getChannelName(index))
+
+    def step_channel(self, step):
+        self.select_channel(channels.selectedChannel() + step)
+
+    def step_pattern(self, step):
+        new = clamp(patterns.patternNumber() + step, 1, patterns.patternCount() + 1)
+        patterns.jumpToPattern(new)
+        self.hint("Pattern " + str(new))
+
+    def toggle_song_mode(self):
+        transport.setLoopMode()
+        self.hint("Mode: " + ("Song" if transport.getLoopMode() else "Pattern"))
 
     def nudge_channel_param(self, delta, get, put, lo, hi, scale=1.0):
         ch = channels.selectedChannel()
@@ -117,11 +155,7 @@ class MiniLab:
             return True
 
         if knob == 0:
-            count = channels.channelCount()
-            if count:
-                new = clamp(channels.selectedChannel() + (1 if d > 0 else -1), 0, count - 1)
-                channels.selectOneChannel(new)
-                self.hint("Channel: " + channels.getChannelName(new))
+            self.step_channel(1 if d > 0 else -1)
         elif knob == 1:
             self.nudge_channel_param(d, channels.getChannelVolume, channels.setChannelVolume, 0.0, 1.0)
         elif knob == 2:
@@ -157,8 +191,8 @@ class MiniLab:
 
     def on_click(self, cc):
         if cc == CLICK_K1:
-            self.channel_rack_mode = not self.channel_rack_mode
-            self.hint("Pads: " + ("Channel Rack" if self.channel_rack_mode else "Selected channel"))
+            self.mode = (self.mode + 1) % len(MODE_NAMES)
+            self.hint("Pads: " + MODE_NAMES[self.mode])
             self.refresh_pad_leds()
         elif cc == CLICK_K9:
             ch = channels.selectedChannel()
@@ -168,23 +202,57 @@ class MiniLab:
     # --- pads -------------------------------------------------------------
 
     def on_pad(self, event):
-        """Channel Rack mode only: route pad to channel N of the current bank."""
+        """Note-offs always release what the pad started,
+        even if the mode changed while it was held."""
         pad = PAD_OF_NOTE.get(event.data1)
         if pad is None:
             return False
         note_on = (event.status & 0xF0) == midi.MIDI_NOTEON and event.data2 > 0
-        if note_on:
-            index = self.bank_start() + pad
-            if index >= channels.channelCount():
-                return True
-            target = channels.getChannelIndex(index)
-            self.held[pad] = target
-            channels.midiNoteOn(target, CHANNEL_RACK_NOTE, event.data2)
-        else:
+        if not note_on:
             target = self.held.pop(pad, None)
             if target is not None:
                 channels.midiNoteOn(target, CHANNEL_RACK_NOTE, 0)
+            seek = self.held_seek.pop(pad, None)
+            if seek is not None:
+                seek(midi.SS_Stop)
+            return True
+
+        index = self.bank_start() + pad
+        if self.mode == MODE_MPC:
+            if index < channels.channelCount():
+                target = channels.getChannelIndex(index)
+                self.held[pad] = target
+                channels.midiNoteOn(target, CHANNEL_RACK_NOTE, event.data2)
+        elif self.mode == MODE_CHANNEL:
+            if index < channels.channelCount():
+                self.select_channel(index)
+        elif self.mode == MODE_TRANSPORT:
+            self.on_transport_pad(pad)
         return True
+
+    def on_transport_pad(self, pad):
+        if pad == 0:
+            transport.start()
+        elif pad == 1:
+            transport.stop()
+        elif pad == 2:
+            transport.record()
+        elif pad in (3, 4):
+            seek = transport.rewind if pad == 3 else transport.fastForward
+            self.held_seek[pad] = seek
+            seek(midi.SS_Start)
+        elif pad == 5:
+            self.toggle_song_mode()
+        elif pad == 6:
+            self.step_channel(-1)  # up the Channel Rack
+        elif pad == 7:
+            self.step_channel(1)
+        elif pad == 8:
+            transport.globalTransport(midi.FPT_Metronome, 1)
+        elif pad in (9, 10):
+            self.step_pattern(-1 if pad == 9 else 1)
+        elif pad == 11:
+            general.undoUp()
 
     # --- transport pads ---------------------------------------------------
 
@@ -201,13 +269,9 @@ class MiniLab:
         elif action == 3:
             transport.globalTransport(midi.FPT_Metronome, 1)
         elif action == 4:
-            transport.setLoopMode()
-            self.hint("Mode: " + ("Song" if transport.getLoopMode() else "Pattern"))
+            self.toggle_song_mode()
         elif action in (5, 6):
-            step = -1 if action == 5 else 1
-            new = clamp(patterns.patternNumber() + step, 1, patterns.patternCount() + 1)
-            patterns.jumpToPattern(new)
-            self.hint("Pattern " + str(new))
+            self.step_pattern(-1 if action == 5 else 1)
         elif action == 7:
             general.undoUp()
 
@@ -230,9 +294,7 @@ class MiniLab:
                 event.handled = True
 
         elif kind in (midi.MIDI_NOTEON, midi.MIDI_NOTEOFF) and chan == CH_DRUMS:
-            if self.channel_rack_mode:
-                event.handled = self.on_pad(event)
-            # otherwise unhandled: FL plays the note on the selected channel
+            event.handled = self.on_pad(event)
 
 
 minilab = MiniLab()
@@ -243,7 +305,7 @@ def OnInit():
 
 
 def OnDeInit():
-    for pad in range(8):
+    for pad in range(16):
         minilab.set_pad_led(pad, OFF)
 
 
@@ -252,5 +314,5 @@ def OnMidiMsg(event):
 
 
 def OnRefresh(flags):
-    if (minilab.channel_rack_mode, minilab.bank_start(), channels.channelCount()) != minilab.led_state:
+    if minilab.current_led_state() != minilab.led_state:
         minilab.refresh_pad_leds()
